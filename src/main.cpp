@@ -2,7 +2,7 @@
 #define led1 LED_BUILTIN
 
 //defined MQTT parameter
-#define MQTT_BROKER IPAddress(192.168.1.1) //if cloud, replace with cloud/broker domain URL
+#define MQTT_BROKER IPAddress(192.168.1.1) //if using cloud broker, replace with cloud/broker domain URL
 #define MQTT_BROKER2 "broker.emqx.io"
 #define MQTT_BROKER3 "192.168.0.208"
 #define MQTT_PORT 1883
@@ -33,6 +33,7 @@
 #include <SoftwareSerial.h>
 #include <InfluxDbClient.h>
 #include <InfluxDbCloud.h>
+#include <ESP8266WebServer.h>
 
 //Define InfluxDB Credential and URLs
 #define INFLUXDB_URL "https://us-east-1-1.aws.cloud2.influxdata.com"
@@ -78,9 +79,10 @@ SoftwareSerial GPS(D8, D7); //(RX, TX)
 WiFiClient espClient;
 PubSubClient client(espClient);
 
-//wifi credential
+//wifi/network credential
 char ssid[] = "Penguin Network_2,4G";
 char pass[] = "bilangwowdulu";
+ESP8266WebServer server(80);
 
 //function redefined before the loop, after add function below
 //main code, please redefined below here
@@ -100,6 +102,7 @@ void syncTime();
 void sensorTag();
 void sendSensorField();
 void checkInfluxDBConnection();
+void initializeWebServer();
 
 //Main code
 void setup(){
@@ -114,9 +117,13 @@ void setup(){
   syncTime();
   checkInfluxDBConnection();
   sensorTag();
+  delay(1000);
+  initializeWebServer();
 }
 
 void loop(){ 
+
+  server.handleClient();
 
   //using millis instead of delay for checking voltage
   size_t currentTime = millis();
@@ -346,4 +353,70 @@ void sendSensorField() {
       influxClient.setConnectionParams(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_BUCKET, INFLUXDB_TOKEN);
     }
   }
+}
+
+void handleRoot() {
+  String message = "Welcome to ESP8266 REST API\n";
+  message += "Available endpoints:\n";
+  message += "/api/sensors - Get all sensor data\n";
+  message += "/api/temperature - Get temperature data\n";
+  message += "/api/humidity - Get humidity data\n";
+  message += "/api/pressure - Get pressure data\n";
+  server.send(200, "text/plain", message);
+}
+
+void handleNotFound() {
+  String message = "Endpoint not found\n\n";
+  message += "URI: ";
+  message += server.uri();
+  message += "\nMethod: ";
+  message += (server.method() == HTTP_GET) ? "GET" : "POST";
+  message += "\nArguments: ";
+  message += server.args();
+  message += "\n";
+  for (uint8_t i = 0; i < server.args(); i++) {
+    message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
+  }
+  server.send(404, "text/plain", message);
+}
+
+void handleGetAllSensors() {
+  String jsonResponse = "{";
+  jsonResponse += "\"temperature\":" + String(AHT10_temperature) + ",";
+  jsonResponse += "\"humidity\":" + String(AHT10_humidity) + ",";
+  jsonResponse += "\"pressure\":" + String(BMP180_pressure) + ",";
+  jsonResponse += "\"altitude\":" + String(BMP180_Alttitude) + ",";
+  jsonResponse += "\"battery_voltage\":" + String(battVoltage) + ",";
+  jsonResponse += "\"rssi\":" + String(rssi);
+  jsonResponse += "}";
+  
+  server.send(200, "application/json", jsonResponse);
+}
+
+void handleGetTemperature() {
+  String jsonResponse = "{\"temperature\":" + String(AHT10_temperature) + "}";
+  server.send(200, "application/json", jsonResponse);
+}
+
+void handleGetHumidity() {
+  String jsonResponse = "{\"humidity\":" + String(AHT10_humidity) + "}";
+  server.send(200, "application/json", jsonResponse);
+}
+
+void handleGetPressure() {
+  String jsonResponse = "{\"pressure\":" + String(BMP180_pressure) + "}";
+  server.send(200, "application/json", jsonResponse);
+}
+
+void initializeWebServer() {
+    // Initialize REST API server
+  server.on("/", handleRoot);
+  server.on("/api/sensors", handleGetAllSensors);
+  server.on("/api/temperature", handleGetTemperature);
+  server.on("/api/humidity", handleGetHumidity);
+  server.on("/api/pressure", handleGetPressure);
+  server.onNotFound(handleNotFound);
+  
+  server.begin();
+  Serial.println("HTTP server started");
 }
